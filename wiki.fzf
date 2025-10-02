@@ -77,6 +77,16 @@ class WikiFzf
       threads = [Thread.new { recently_viewed },
                  Thread.new { recently_modified }]
 
+      Thread.new do
+        loop do
+          sleep 0.5
+          Process.getpgid(io.pid)
+        rescue StandardError
+          break
+        end
+        exit 1 if threads.any?(&:alive?)
+      end
+
       list = threads.flat_map(&:value)
       list = list.group_by { it[:url] }.transform_values do |items|
         items.max_by { it[:time] }
