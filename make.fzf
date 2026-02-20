@@ -47,6 +47,11 @@ Reline.pre_input_hook = lambda do
   Reline.pre_input_hook = nil
 end
 
-command = Reline.readline('$ '.blue.bold, false)
+command =
+  begin
+    Reline.readline('$ '.blue.bold, false)
+  rescue Interrupt
+    nil
+  end
 exit if command.nil? || command.strip.empty?
 exec(command)
