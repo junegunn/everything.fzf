@@ -22,22 +22,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-tool=$(mise registry |
-       fzf --style full --prompt 'tool> ' --nth 1 --color fg:dim,nth:regular --accept-nth 1)
-[[ $tool ]] || exit 1
+RELOAD='reload:rg --column --color=always --smart-case {q} || :'
+OPENER='if [[ $FZF_SELECT_COUNT -eq 0 ]]; then
+          "$EDITOR" {1} +{2}     # No selection. Open the current line in $EDITOR.
+        elif [[ $EDITOR == vim ]] || [[ $EDITOR == nvim ]]; then
+          "$EDITOR" +cw -q {+f}  # Build quickfix list for the selected items.
+        else
+          "$EDITOR" {+1}
+        fi'
 
-version=$(
-  (
-    mise ls-remote "$tool" |
-      grep -Fxv -f <(mise ls "$tool" | awk '{print $2}') |
-      sed 's/^/remote\t/'
-    echo -e "remote\tlatest"
-    mise ls "$tool" | awk '{print "local\t" $2}';
-  ) | fzf --prompt "$tool@" --tabstop 16 --accept-nth 2 \
-          --header 'Press CTRL-Y to copy coordinate to clipboard' \
-          --bind "ctrl-y:become:echo -n $tool@{2} | pbcopy" \
-          --style full --tac --tiebreak index
-)
-[[ $version ]] || exit 1
-
-mise use "$@" "$tool@$version"
+fzf --no-height --no-tmux --ansi --multi --query "${*:-}" \
+    --bind "start:$RELOAD" \
+    --bind "enter:become:$OPENER" \
+    --bind "ctrl-o:execute:$OPENER" \
+    --bind 'alt-a:select-all,alt-d:deselect-all,ctrl-/:toggle-preview' \
+    --delimiter : \
+    --freeze-left 1 \
+    --preview 'bat --color=always --highlight-line {2} {1}' \
+    --preview-window 'up,border-bottom,~3,+{2}+3/3'
