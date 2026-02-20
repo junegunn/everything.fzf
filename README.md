@@ -106,6 +106,10 @@ usage: kube.fzf [p|d|j|cj|sc|sn]
   history with more screen estate.
 * You can press `CTRL-E` to edit the selected item in your editor
 
+### [_make_](https://www.gnu.org/software/make/)[.fzf](make.fzf)
+
+* Select Makefile targets to run
+
 ### [_mise_](https://mise.jdx.dev/)[.fzf](mise.fzf)
 
 * First select a tool, then select a version of it to use it

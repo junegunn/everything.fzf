@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'ansi256'
+  gem 'reline'
+end
+
+unless %w[GNUmakefile makefile Makefile].any? { |f| File.exist?(f) }
+  warn 'No Makefile found'
+  exit 1
+end
+
+output = `make -qp 2>/dev/null`
+chunks = output.split(/^$/).map(&:strip)
+chunks = chunks.select { it.each_line.first&.match?(%r{^[a-zA-Z0-9][^$#/\t=]*:}) }
+
+command = 'fzf --multi --ansi --read0 --style full --reverse --gap ' \
+          '--highlight-line --delimiter : --accept-nth 1 --tiebreak begin'
+
+targets = IO.popen(command.split + ARGV, 'r+') do |io|
+  chunks.each do |chunk|
+    head, *rest = chunk.lines
+    name, deps = head.split(':', 2).map(&:strip)
+    rest = rest.drop_while { it.start_with?('#') }
+    io.puts [name.blue.bold, deps.dim.italic].join(': ')
+    io.print rest.join("\n")
+    io.print "\x0"
+  end
+
+  io.close_write
+  io.read.lines.map(&:chomp)
+end
+
+exit if targets.empty?
+
+all_targets = chunks.map { it.each_line.first.split(':', 2).first.strip }
+Reline.completion_proc = ->(input) { all_targets.select { it.start_with?(input) } }
+
+command = "make #{targets.join(' ')}"
+Reline.pre_input_hook = lambda do
+  Reline.insert_text(command)
+  Reline.redisplay
+  Reline.pre_input_hook = nil
+end
+
+command = Reline.readline('$ '.blue.bold, false)
+exit if command.nil? || command.strip.empty?
+exec(command)
