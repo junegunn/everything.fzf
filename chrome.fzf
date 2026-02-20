@@ -77,7 +77,7 @@ module ChromeFzf
     <<~CMD
       fzf --ansi --read0 #{'--multi' unless name == :tabs} --info inline-right --reverse --scheme history \\
           --header-border --gap \\
-          --highlight-line --height 100% --wrap --wrap-sign ' ↳ ' \\
+          --highlight-line --height 100% --wrap word --wrap-sign ' ↳ ' \\
           --border --border-label " Chrome::#{name.capitalize} " --delimiter "#{DELIMITER}" \\
           --header '╱ CTRL-T: Tabs ╱ CTRL-H: History ╱ CTRL-B: Bookmarks ╱ CTRL-Y: Copy to clipboard ╱' \\
           --with-shell 'bash -c' \\

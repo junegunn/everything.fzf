@@ -42,7 +42,7 @@ SQL = <<~'SQL'
 SQL
 
 FZF = <<~'CMD'
-  fzf --no-height --tmux 100% --reverse --gap --read0 --highlight-line --wrap \
+  fzf --no-height --tmux 100% --reverse --gap --read0 --highlight-line --wrap word \
       --style full --header-border none \
       --header 'Press CTRL-E to edit it in the editor' \
       --bind 'enter:become:echo -n {} | pbcopy' \

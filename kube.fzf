@@ -124,7 +124,7 @@ cj) # CronJobs
     --bind "ctrl-r:reload($command)+refresh-preview" \
     --bind 'ctrl-t:execute-silent(kubectl create job --namespace {1} --from=cronjob/{2} {2}-manual-$(date +%s))+refresh-preview' \
     --bind "ctrl-alt-x:execute(kubectl delete cronjob -n {1} {2})+reload:$command" \
-    --preview-window bottom,wrap \
+    --preview-window bottom,wrap-word \
     --preview "
       jobs=\$(kubectl get jobs --namespace {1} -o=jsonpath='{.items[?(@.metadata.ownerReferences[*].name==\"'{2}'\")].metadata.name}')
       if [[ -n \$jobs ]]; then
