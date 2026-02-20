@@ -60,6 +60,13 @@ Scripts
     * `h` for history
     * `b` for bookmarks
 
+### [_docker_](https://www.docker.com/)[.fzf](docker.fzf)
+
+* List running containers with memory usage
+* Preview container logs in the bottom pane
+* Press `CTRL-S` to stop a container, `CTRL-T` to show stats and top
+* Press `CTRL-O` to open full logs in your editor
+
 ### [_figlet_](http://www.figlet.org/)[.fzf](figlet.fzf)
 
 * Type in text, select a font, preview the result, and press enter to copy it
