@@ -41,6 +41,7 @@ end
 class JiraFzf
   COLUMNS = ENV.fetch('FZF_PREVIEW_COLUMNS', 80).to_i
   SEPARATOR = "\n#{'━' * COLUMNS}\n\n".freeze
+  ZWSP = "\u200B"
 
   def initialize
     @options = { lines: 10, limit: 1000, query: '', color: true }
@@ -142,14 +143,16 @@ class JiraFzf
     auth = @options[:auth] ? " -u #{@options[:auth].shellescape}" : ''
     <<~CMD
       fzf --ansi --read0 --multi --info inline-right --reverse --scheme history \\
+          --delimiter "#{ZWSP}" --with-nth ..4 \\
           --highlight-line --height 100% --wrap word \\
           --gap --border --border-label " "#{@jql.shellescape}" " \\
           --tiebreak begin \\
-          --header '╱ CTRL-Y: Copy to clipboard ╱ CTRL-V: View ╱ CTRL-/: Toggle preview ╱' \\
+          --header '╱ CTRL-Y: Copy to clipboard ╱ CTRL-V: View ╱ CTRL-O: Expand/collapse ╱ CTRL-/: Toggle preview ╱' \\
           --header-border bottom \\
           --query #{@options[:query].shellescape} \\
           --preview-window hidden,wrap-word \\
           --preview 'ruby #{__FILE__.shellescape} #{auth} #{@url} --print={1}' \\
+          --bind 'ctrl-o:change-with-nth:..5|..|..3|' \\
           --bind ctrl-/:toggle-preview \\
           --bind 'enter:execute-silent(for key in {+1}; do open #{@url}/browse/$key; done)+clear-selection' \\
           --bind 'ctrl-y:execute-silent(echo -n {+1} | pbcopy)+clear-selection+bell' \\
@@ -167,17 +170,23 @@ class JiraFzf
       key:,
       fields: { summary:, status:, creator:, assignee:, description:, updated:, created: }
     }
-    puts [key.red.bold, format_status(status[:name]), summary.bold].join('  ')
-    puts [format_time(created).magenta,
-          format_time(updated).magenta,
-          creator&.fetch(:name)&.blue,
-          assignee&.fetch(:name)&.cyan].compact.join(' ╱ ')
+    puts [key.red.bold, format_status(status[:name]), summary.bold].map { it + ZWSP }.join('  ')
+    print [format_time(created).magenta,
+           format_time(updated).magenta,
+           creator&.fetch(:name)&.blue,
+           assignee&.fetch(:name)&.cyan].compact.join(' ╱ ')
+    puts ZWSP
     puts SEPARATOR if separator
     return unless description
 
     lines = description.lines.map { _1.chomp.send(fun) }
-    lines = lines.take(head) if head
-    print lines.join("\n")
+    if head
+      puts lines.take(head)
+      print ZWSP
+      puts lines.drop(head)
+    else
+      puts lines
+    end
   end
 
   def format_time(time)
