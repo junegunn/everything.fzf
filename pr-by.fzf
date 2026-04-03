@@ -28,16 +28,22 @@ if [[ "$1" == --limit=* ]]; then
   limit="${1#--limit=}"
   shift
 fi
-who=$1
-shift
+# Join all remaining arguments as the search query
+query="$*"
+
+if [[ -z "$query" ]]; then
+  echo "Error: No search query provided."
+  echo "Usage: $0 [--limit=50] author:me state:open"
+  exit 1
+fi
 
 fzf --tmux 80%,100%,border-native --ansi \
     --info inline --reverse --header-lines 4 \
     --preview 'GH_FORCE_TTY=$FZF_PREVIEW_COLUMNS gh pr view --repo {1} --comments {2}' \
     --preview-window up:border-down \
     --with-shell 'bash -c' \
-    --bind "start:preview(echo Loading pull requests ...)+reload:GH_FORCE_TTY=95% gh search prs --author $who --limit $limit" \
-    --bind 'load:transform:(( FZF_TOTAL_COUNT )) || echo become:echo No pull requests' \
+    --bind "start:preview(echo Loading pull requests ...)+reload:GH_FORCE_TTY=95% gh search prs $query --limit $limit" \
+    --bind "load:transform:(( FZF_TOTAL_COUNT )) || echo \"become:echo No results found for query: $query\"" \
     --bind 'enter,ctrl-o:execute-silent:gh pr view --web --repo {1} {2}' \
     --bind 'ctrl-v:execute:gh pr view --repo {1} {2} | sed "s/\r//g" | view - +"setf markdown"' \
-    --footer 'CTRL-O to open in browser / CTRL-V to open in editor' "$@"
+    --footer="Query: $query | CTRL-O to open in browser / CTRL-V to open in editor"
