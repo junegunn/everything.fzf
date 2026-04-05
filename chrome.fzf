@@ -70,7 +70,7 @@ module ChromeFzf
 
   private
 
-  def path(name) = File.join(Dir.home, BASE_PATH, 'Default', name)
+  def paths(name) = Dir[File.join(Dir.home, BASE_PATH, '**', name)]
 
   # Build fzf command
   def fzf(name)
@@ -116,11 +116,13 @@ module ChromeFzf
   def history
     Tempfile.create('chrome') do |temp|
       temp.close
-      FileUtils.cp(path('History'), temp.path)
-      SQLite3::Database.open(temp.path) do |db|
-        rows = db.execute('select title, url, last_visit_time from urls order by last_visit_time desc')
-        rows.map do |title, url, time|
-          [title, url, to_unix(time)]
+      paths('History').flat_map do |history_path|
+        FileUtils.cp(history_path, temp.path)
+        SQLite3::Database.open(temp.path) do |db|
+          rows = db.execute('select title, url, last_visit_time from urls order by last_visit_time desc')
+          rows.map do |title, url, time|
+            [title, url, to_unix(time)]
+          end
         end
       end
     end
@@ -136,12 +138,14 @@ module ChromeFzf
       end
     end
 
-    JSON.load_file(path('Bookmarks'), symbolize_names: true)
+    paths('Bookmarks').flat_map do |bookmark_path|
+      JSON.load_file(bookmark_path, symbolize_names: true)
         .fetch(:roots, {})
         .values
         .flat_map { |e| build[nil, e] }
         .sort_by(&:last)
         .reverse
+    end
   end
 
   def tabs
