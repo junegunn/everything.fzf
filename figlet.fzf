@@ -22,14 +22,24 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-PREVIEW='for f in {+}; do figlet -f "$f" -w "$FZF_PREVIEW_COLUMNS" {q}; echo; done'
-
 figlist | sed '1,/Figlet fonts/d; /Figlet control/,$d' |
-  fzf --query "${*:-hello}" --disabled --multi --reverse \
+  fzf --query "${*:-hello / }" --multi --reverse \
       --with-shell 'bash -c' \
       --tmux 100% \
-      --preview 'for f in {+}; do figlet -f "$f" -w "$FZF_PREVIEW_COLUMNS" {q}; echo; done' \
+      --header-border --header 'TEXT TO PREVIEW / SEARCH QUERY' \
+      --preview '
+        text={q}
+        [[ $text == */* ]] && text=${text%%/*}
+        for f in {+}; do
+          figlet -f "$f" -w "$FZF_PREVIEW_COLUMNS" "$text"
+          echo
+        done' \
       --preview-window 70% \
+      --disabled \
       --bind 'enter:become:
-        for f in {+}; do figlet -f "$f" -w $(tput cols) {q}; done | pbcopy;
-        echo "Copied to clipboard"'
+        text={q}
+        [[ $text == */* ]] && text=${text%%/*}
+        for f in {+}; do figlet -f "$f" -w $(tput cols) "$text"; done | pbcopy;
+        echo "Copied to clipboard"' \
+      --bind 'start,change:transform-search:
+        [[ {q} == */* ]] && sed "s@^.*/@@" <<< {q} || echo ""'

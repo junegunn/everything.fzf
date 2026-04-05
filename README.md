@@ -71,6 +71,9 @@ Scripts
 
 * Type in text, select a font, preview the result, and press enter to copy it
   to the clipboard.
+* Use `/` to separate the text from a search query
+  (e.g. `hello / banner` to preview "hello" while filtering for fonts matching
+  "banner"). If there is no `/`, the whole query is used as the text.
 
 ### [_gist_](https://gist.github.com/)[.fzf](gist.fzf)
 
