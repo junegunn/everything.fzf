@@ -24,7 +24,7 @@
 
 read -d '' -r OPTS << 'EOF'
   --height 100% --border --layout reverse --info inline-right --with-shell 'bash -c'
-  --style full --header-lines-border none --no-input-border
+  --style full --header-lines-border inline --no-input-border
   --color nth:regular,fg:dim
   --bind 'click-header:transform:
     if [[ $FZF_CLICK_HEADER_WORD =~ ^[A-Z]+$ ]]; then

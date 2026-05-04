@@ -32,7 +32,7 @@ read -d '' -r list << 'SCRIPT'
 SCRIPT
 
 fzf --ansi --info inline-right --reverse --header-lines 1 \
-    --style full --header-lines-border none --no-input-border \
+    --style full --header-lines-border inline --no-input-border \
     --border-label ' DOCKER ' --with-shell 'bash -c' \
     --with-nth 2.. --color nth:regular,fg:dim \
     --header 'Enter (exec) │ CTRL-O (logs in editor) │ CTRL-S (stop) │ CTRL-R (reload)

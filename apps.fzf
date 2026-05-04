@@ -33,7 +33,7 @@ gemfile do
 end
 
 FZF = <<~'CMD'
-  fzf --style full --header-border none --reverse \
+  fzf --style full --header-border inline --reverse \
       --list-label ' Loading applications ... ' --list-label-pos 4 \
       --bind 'load:change-list-label:' \
       --header-lines 1 \
