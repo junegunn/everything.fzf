@@ -60,6 +60,12 @@ Scripts
     * `h` for history
     * `b` for bookmarks
 
+### [_claude_](https://www.claude.com/product/claude-code)[.fzf](claude.fzf)
+
+* Browse prompts from `~/.claude/history.jsonl`
+* Press enter to resume the session or switch to the tmux pane running the
+  session
+
 ### [_docker_](https://www.docker.com/)[.fzf](docker.fzf)
 
 * List running containers with memory usage

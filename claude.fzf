@@ -1,0 +1,164 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# MIT License
+#
+# Copyright (c) 2026 Junegunn Choi
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+require 'json'
+require 'time'
+require 'shellwords'
+require 'bundler/inline'
+
+gemfile do
+  source 'https://rubygems.org'
+  gem 'ansi256'
+end
+
+HISTORY = File.expand_path('~/.claude/history.jsonl')
+abort "History file not found: #{HISTORY}" unless File.exist?(HISTORY)
+
+entries = File.foreach(HISTORY).filter_map do |line|
+  JSON.parse(line, symbolize_names: true)
+      .tap { it => { sessionId:, timestamp:, display: } }
+rescue JSON::ParserError, NoMatchingPatternKeyError
+  nil
+end
+
+def format_time(timestamp)
+  Time.at(timestamp / 1000).localtime.strftime('%F %a %T')
+end
+
+if ARGV.delete('--preview')
+  session = ARGV.first
+  abort 'usage: claude.fzf --preview SESSION' unless session
+
+  entries = entries.select { it[:sessionId] == session }
+
+  entries.sort_by { -it[:timestamp].to_i }.each_with_index do |entry, idx|
+    idx = "##{entries.length - idx}/#{entries.length}"
+    entry => { timestamp:, display: }
+
+    header = "#{idx.green} #{format_time(timestamp).cyan}"
+    puts header
+    puts ('▔' * header.plain.length).dim
+    puts display.italic
+    puts
+  end
+  exit
+end
+
+RS = "\x0"
+ZWSP = "\u200B"
+HOME = Dir.home
+
+# ANSI 256 color palette, skipping the darkest cube colors for legibility.
+COLORS = (17..230).select do |c|
+  idx = c - 16
+  rgb = [idx / 36, (idx / 6) % 6, idx % 6]
+  r, g, b = rgb
+  rgb.sum >= 7 && r > g && g > b
+end.freeze
+
+panes = if ENV['TMUX']
+          `tmux list-panes -a -F "\#{pane_tty} \#{session_name} \#{window_id} \#{pane_id}"`
+            .lines
+            .map { it.strip.split }
+            .group_by(&:shift)
+            .transform_values(&:flatten)
+            .then do |panes|
+              `pgrep -x claude | xargs -L 1 -I {} lsof -a -p {} -d cwd,0 -Fn`
+                .split(/^p/)
+                .reject(&:empty?)
+                .filter_map do |item|
+                  tokens = item.split(/\n+/)
+                  tty = tokens[4][1..]
+                  pane = panes[tty]
+                  [tokens[2][1..], pane] if pane
+                end.to_h
+            end
+        end || {}
+
+COLUMN_HEADER = [
+  'TIMESTAMP'.ljust(23),
+  'PANE'.ljust(5),
+  'SESSION'.ljust(36),
+  'PROJECT'
+].map(&:bold).join('  ')
+
+entries = entries.group_by { it[:sessionId] }.transform_values do |items|
+  items = items.sort_by { -it[:timestamp].to_i }
+  offset = 1
+  items.map do |item|
+    item.merge(offset: offset).tap do
+      offset += item[:display].to_s.each_line.count + 3
+    end
+  end
+end.values.flatten
+
+color_map = Hash.new { |h, k| h[k] = COLORS[h.size % COLORS.size] }
+
+fzf_command = <<~CMD
+  fzf --read0 --ansi --reverse --style full --gap --wrap word \\
+      --delimiter "#{ZWSP}" --with-nth 5.. --accept-nth '{1}' \\
+      --highlight-line --scheme history \\
+      --border --border-label ' Claude sessions ' \\
+      --header 'Press Ctrl-/ to toggle preview' --header-lines 1 \\
+      --header-border dashed --header-lines-border inline \\
+      --preview 'ruby #{__FILE__.shellescape} --preview {2}' \\
+      --preview-window 'hidden:wrap-word:+{4}' \\
+      --bind 'ctrl-/:toggle-preview' #{ARGV.map(&:shellescape).join(' ')}
+CMD
+
+selected = IO.popen(fzf_command, 'r+') do |io|
+  io.print((ZWSP * 4) + COLUMN_HEADER + RS)
+  entries.sort_by { -it[:timestamp].to_i }.each do |entry|
+    entry => { sessionId: session, project:, timestamp:, display:, offset: }
+    dir = project.start_with?(HOME) ? project.sub(HOME, '~') : project
+
+    if (pane = panes[project])
+      sess, win, pane_id = pane
+      command = "tmux switch-client -t #{sess.shellescape} && \
+                 tmux select-window -t #{win} && \
+                 tmux select-pane -t #{pane_id}"
+      pane_display = pane_id.ljust(5).green
+    else
+      command = "cd #{project.shellescape} && exec claude -r #{session}"
+      pane_display = '     '
+    end
+
+    io.print [command, session, project, offset].map { it.to_s + ZWSP }.join
+    io.puts [format_time(timestamp).cyan,
+             pane_display,
+             session.fg(color_map[session]),
+             dir.blue].map { it + ZWSP }.join('  ')
+    display.each_line do
+      io.print "  #{it.italic}"
+    end
+    io.print RS
+  rescue Errno::EPIPE
+    break
+  end
+  io.close_write
+  io.gets
+end
+
+exec "eval #{selected.shellescape}" if selected
