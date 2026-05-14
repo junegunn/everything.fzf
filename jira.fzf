@@ -23,18 +23,21 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-require 'bundler/inline'
 require 'optparse'
 require 'time'
 require 'json'
 require 'net/http'
 require 'shellwords'
 
-gemfile do
-  source 'https://rubygems.org'
-  gem 'ansi256'
-  gem 'base64'
-  gem 'openssl', '>= 3.3.1'
+gems = %w[ansi256 base64]
+begin
+  gems.each { require it }
+rescue LoadError
+  require 'bundler/inline'
+  gemfile(true) do
+    source 'https://rubygems.org'
+    gems.each { gem it }
+  end
 end
 
 # Jira meets fzf

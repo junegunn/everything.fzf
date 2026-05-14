@@ -25,11 +25,15 @@
 
 require 'json'
 require 'shellwords'
-require 'bundler/inline'
 
-gemfile do
-  source 'https://rubygems.org'
-  gem 'unicode-display_width', require: 'unicode/display_width'
+begin
+  require 'unicode/display_width'
+rescue LoadError
+  require 'bundler/inline'
+  gemfile(true) do
+    source 'https://rubygems.org'
+    gem 'unicode-display_width', require: 'unicode/display_width'
+  end
 end
 
 FZF = <<~'CMD'

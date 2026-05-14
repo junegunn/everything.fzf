@@ -23,7 +23,6 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-require 'bundler/inline'
 require 'optparse'
 require 'time'
 require 'json'
@@ -31,10 +30,14 @@ require 'net/http'
 require 'base64'
 require 'shellwords'
 
-gemfile do
-  source 'https://rubygems.org'
-  gem 'ansi256'
-  gem 'openssl', '>= 3.3.1'
+begin
+  require 'ansi256'
+rescue LoadError
+  require 'bundler/inline'
+  gemfile(true) do
+    source 'https://rubygems.org'
+    gem 'ansi256'
+  end
 end
 
 class WikiFzf

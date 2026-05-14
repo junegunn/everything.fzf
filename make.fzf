@@ -24,12 +24,16 @@
 # SOFTWARE.
 
 require 'stringio'
-require 'bundler/inline'
 
-gemfile do
-  source 'https://rubygems.org'
-  gem 'ansi256'
-  gem 'reline'
+gems = %w[ansi256 reline]
+begin
+  gems.each { require it }
+rescue LoadError
+  require 'bundler/inline'
+  gemfile(true) do
+    source 'https://rubygems.org'
+    gems.each { gem it }
+  end
 end
 
 unless %w[GNUmakefile makefile Makefile].any? { |f| File.exist?(f) }

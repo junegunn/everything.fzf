@@ -24,12 +24,16 @@
 # SOFTWARE.
 
 require 'open3'
-require 'bundler/inline'
 
-gemfile do
-  source 'https://rubygems.org'
-  gem 'sqlite3'
-  gem 'ansi256'
+gems = %w[sqlite3 ansi256]
+begin
+  gems.each { require it }
+rescue LoadError
+  require 'bundler/inline'
+  gemfile(true) do
+    source 'https://rubygems.org'
+    gems.each { gem it }
+  end
 end
 
 DB = File.expand_path('~/Library/Containers/org.p0deje.Maccy/Data/Library/Application Support/Maccy/Storage.sqlite')
