@@ -114,7 +114,7 @@ class JiraFzf
     }
     paged('/rest/api/2/search', params) do |result|
       result[:issues].each do |issue|
-        print_issue_formatted(issue, head: @options[:lines])
+        print_issue_formatted(issue, listed: true, head: @options[:lines])
         print "\x0"
       end
     end
@@ -122,7 +122,7 @@ class JiraFzf
 
   def print_issue(id)
     issue = get_path("/rest/api/2/issue/#{id}")
-    print_issue_formatted(issue, separator: true, fun: :itself)
+    print_issue_formatted(issue, listed: false, fun: :itself)
     puts
   end
 
@@ -168,24 +168,25 @@ class JiraFzf
     CMD
   end
 
-  def print_issue_formatted(issue, head: nil, separator: false, fun: :dim)
+  def print_issue_formatted(issue, head: nil, listed:, fun: :dim)
+    zwsp = listed ? ZWSP : ''
     issue => {
       key:,
       fields: { summary:, status:, creator:, assignee:, description:, updated:, created: }
     }
-    puts [key.red.bold, format_status(status[:name]), summary.bold].map { it + ZWSP }.join('  ')
+    puts [key.red.bold, format_status(status[:name]), summary.bold].map { it + zwsp }.join('  ')
     print [format_time(created).magenta,
            format_time(updated).magenta,
            creator&.fetch(:name)&.blue,
            assignee&.fetch(:name)&.cyan].compact.join(' ╱ ')
-    puts ZWSP
-    puts SEPARATOR if separator
+    puts zwsp
+    puts SEPARATOR unless listed
     return unless description
 
     lines = description.lines.map { _1.chomp.send(fun) }
     if head
       puts lines.take(head)
-      print ZWSP
+      print zwsp
       puts lines.drop(head)
     else
       puts lines
