@@ -23,8 +23,8 @@
 # SOFTWARE.
 
 fzf --no-height --no-tmux --reverse --with-nth 2.. --ansi \
-    --input-border --info inline-right \
-    --bind $'start:reload:gh gist list | column -t -s "\t"' \
+    --input-border line --info inline-right \
+    --bind $'start:reload:gh gist list | sed \'s/\t\t/\t-\t/g\' | column -t -s "\t"' \
     --bind 'enter:execute:gh gist edit {1}' \
     --preview 'GH_FORCE_TTY=$FZF_PREVIEW_COLUMNS gh gist view {1}' \
-    --preview-window bottom:60%
+    --preview-window bottom:60% --preview-border line
