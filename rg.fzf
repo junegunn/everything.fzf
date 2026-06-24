@@ -22,8 +22,31 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-RELOAD='reload:rg --column --color=always --smart-case {q} || :'
-OPENER='if [[ $FZF_SELECT_COUNT -eq 0 ]]; then
+export RG_FZF_PREV=$(mktemp)
+trap 'rm -f "$RG_FZF_PREV"' EXIT INT TERM
+printf ' ' > "$RG_FZF_PREV"  # sentinel: leading space is impossible after trim, forces initial reload
+
+ACTION='bg-transform:shopt -s extglob
+        rg_query=" "{q}
+        rg_query=${rg_query% / *}
+        rg_query=${rg_query##+( )}
+        rg_query=${rg_query% /}
+        rg_query=${rg_query%%+( )}
+        fzf_query=" "{q}
+        if [[ $fzf_query == *" / "* ]]; then
+          fzf_query=${fzf_query##* / }
+          fzf_query=${fzf_query##+( )}
+          fzf_query=${fzf_query%%+( )}
+        else
+          fzf_query=
+        fi
+        if [[ $rg_query != "$(cat "$RG_FZF_PREV" 2>/dev/null)" ]]; then
+          printf "%s" "$rg_query" > "$RG_FZF_PREV"
+          printf "reload(rg --column --color=always --smart-case \"\$(cat \"\$RG_FZF_PREV\")\" || :)+"
+        fi
+        printf "search:%s" "$fzf_query"'
+OPENER='EDITOR=${EDITOR:-vim}
+        if [[ $FZF_SELECT_COUNT -eq 0 ]]; then
           "$EDITOR" {1} +{2}     # No selection. Open the current line in $EDITOR.
         elif [[ $EDITOR == vim ]] || [[ $EDITOR == nvim ]]; then
           "$EDITOR" +cw -q {+f}  # Build quickfix list for the selected items.
@@ -32,10 +55,13 @@ OPENER='if [[ $FZF_SELECT_COUNT -eq 0 ]]; then
         fi'
 
 fzf --no-height --tmux 100% --disabled --ansi --multi --query "${*:-}" \
-    --bind "start,change:$RELOAD" \
+    --with-shell 'bash -c' \
+    --bind "start,change:$ACTION" \
     --bind "enter:become:$OPENER" \
     --bind "ctrl-o:execute:$OPENER" \
     --bind 'alt-a:select-all,alt-d:deselect-all,ctrl-/:toggle-preview' \
+    --header-border --header $'RG QUERY \e[2m/\e[0m FZF QUERY\n\e[1menter\e[0m open  \e[2m·\e[0m  \e[1mctrl-o\e[0m open (no exit)  \e[2m·\e[0m  \e[1malt-a/d\e[0m (de)select  \e[2m·\e[0m  \e[1mctrl-/\e[0m preview' \
     --delimiter : \
     --preview 'bat --color=always --highlight-line {2} {1}' \
-    --preview-window 'up,border-bottom,~3,+{2}+3/3'
+    --preview-window 'up,border-bottom,~3,+{2}+3/3' \
+    < /dev/null

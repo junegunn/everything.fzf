@@ -149,7 +149,14 @@ pr-by.fzf junegunn
 
 ### [_rg_](https://github.com/BurntSushi/ripgrep)[.fzf](rg.fzf)
 
-* See https://junegunn.github.io/fzf/tips/ripgrep-integration/
+* Type ` / ` to split the input into two queries: the part before drives the
+  ripgrep search, the part after filters the results with fzf
+  * e.g. `foobar / .js:` searches for `foobar` with ripgrep, then narrows the
+    matches to `.js` files with fzf
+* `enter` opens the selection in `$EDITOR` (defaults to vim); with multiple
+  selections it builds a quickfix list
+* Press `CTRL-O` to open without exiting fzf
+* Press `ALT-A`/`ALT-D` to select/deselect all, `CTRL-/` to toggle the preview
 
 ### [_ssh_](https://en.wikipedia.org/wiki/Secure_Shell)[.fzf](ssh.fzf)
 
