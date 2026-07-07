@@ -124,7 +124,7 @@ fzf_command = <<~CMD
   fzf --read0 --ansi --reverse --style full --gap --wrap word \\
       --delimiter "#{ZWSP}" --with-nth 5.. --accept-nth '{1}' \\
       --highlight-line --scheme history \\
-      --border --border-label ' Claude sessions ' \\
+      --border-label ' Claude sessions ' \\
       --header 'Press Ctrl-/ to toggle preview' --header-lines 1 \\
       --header-border dashed --header-lines-border inline \\
       --preview 'ruby #{__FILE__.shellescape} --preview {2}' \\
