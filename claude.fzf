@@ -82,23 +82,64 @@ COLORS = (17..230).select do |c|
   rgb.sum >= 7 && r > g && g > b
 end.freeze
 
+# Session ID of a running claude process, read from the environment of its
+# child processes (MCP servers, tool shells). Nil for a childless claude.
+def session_of(pid)
+  children = `pgrep -P #{pid}`.split
+  return if children.empty?
+
+  `ps -Eww -o command= -p #{children.join(',')}`[/\bCLAUDE_CODE_SESSION_ID=(\S+)/, 1]
+end
+
+def start_time_of(pid)
+  Time.parse(`ps -o lstart= -p #{pid}`)
+rescue ArgumentError
+  nil
+end
+
 panes = if ENV['TMUX']
-          `tmux list-panes -a -F "\#{pane_tty} \#{session_name} \#{window_id} \#{pane_id}"`
-            .lines
-            .map { it.strip.split }
-            .group_by(&:shift)
-            .transform_values(&:flatten)
-            .then do |panes|
-              `pgrep -x claude | xargs -L 1 -I {} lsof -a -p {} -d cwd,0 -Fn`
-                .split(/^p/)
-                .reject(&:empty?)
-                .filter_map do |item|
-                  tokens = item.split(/\n+/)
-                  tty = tokens[4][1..]
-                  pane = panes[tty]
-                  [tokens[2][1..], pane] if pane
-                end.to_h
-            end
+          ttys = `tmux list-panes -a -F "\#{pane_tty} \#{session_name} \#{window_id} \#{pane_id}"`
+                   .lines
+                   .map { it.strip.split }
+                   .group_by(&:shift)
+                   .transform_values(&:flatten)
+
+          pids = `ps -axco pid=,comm=`.lines.filter_map do |line|
+            pid, comm = line.split
+            pid if comm == 'claude'
+          end
+
+          procs = (pids.empty? ? '' : `lsof -a -p #{pids.join(',')} -d cwd,0 -Fn`)
+                    .split(/^p/)
+                    .reject(&:empty?)
+                    .filter_map do |item|
+                      tokens = item.split(/\n+/)
+                      pane = ttys[tokens[4][1..]]
+                      { pid: tokens[0], cwd: tokens[2][1..], pane: } if pane
+                    end
+
+          sessions = {}
+          orphans = procs.reject do |prc|
+            (session = session_of(prc[:pid])) && (sessions[session] = prc[:pane])
+          end
+
+          # A childless claude exposes no session ID. Fall back to the single
+          # unclaimed transcript modified after the process started, skipping
+          # ambiguous cases; a wrong pane is worse than none.
+          orphans.filter_map do |prc|
+            next unless (start = start_time_of(prc[:pid]))
+
+            dir = File.expand_path("~/.claude/projects/#{prc[:cwd].gsub(/[^a-zA-Z0-9]/, '-')}")
+            found = Dir["#{dir}/*.jsonl"]
+                      .select { File.mtime(it) >= start }
+                      .map { File.basename(it, '.jsonl') }
+                      .reject { sessions.key?(it) }
+            [found.first, prc[:pane]] if found.length == 1
+          end.group_by(&:first).each do |session, list|
+            sessions[session] = list.first.last if list.length == 1
+          end
+
+          sessions
         end || {}
 
 COLUMN_HEADER = [
@@ -138,7 +179,7 @@ selected = IO.popen(fzf_command, 'r+') do |io|
     entry => { sessionId: session, project:, timestamp:, display:, offset: }
     dir = project.start_with?(HOME) ? project.sub(HOME, '~') : project
 
-    if (pane = panes[project])
+    if (pane = panes[session])
       sess, win, pane_id = pane
       command = "tmux switch-client -t #{sess.shellescape} && \
                  tmux select-window -t #{win} && \
