@@ -51,6 +51,56 @@ def format_time(timestamp)
   Time.at(timestamp / 1000).localtime.strftime('%F %a %T')
 end
 
+def project_dir(project)
+  File.expand_path("~/.claude/projects/#{project.gsub(/[^a-zA-Z0-9]/, '-')}")
+end
+
+def session_title_from_index(session, project)
+  path = File.join(project_dir(project), 'sessions-index.json')
+  return unless File.exist?(path)
+
+  data = JSON.parse(File.read(path))
+  entry = data.fetch('entries', []).find { it['sessionId'] == session }
+  entry&.values_at('customTitle', 'summary', 'firstPrompt')&.find { it.to_s.strip != '' }
+rescue JSON::ParserError
+  nil
+end
+
+def session_title_from_transcript(session, project)
+  path = File.join(project_dir(project), "#{session}.jsonl")
+  return unless File.exist?(path)
+
+  title = nil
+  File.foreach(path) do |line|
+    event = JSON.parse(line)
+    title = case event['type']
+            when 'custom-title'
+              event['customTitle']
+            when 'agent-name'
+              event['agentName']
+            when 'ai-title'
+              event['aiTitle']
+            else
+              title
+            end
+  rescue JSON::ParserError
+    next
+  end
+  title
+end
+
+def session_title(session, project)
+  title = session_title_from_index(session, project) ||
+          session_title_from_transcript(session, project)
+  title.to_s.lines.first.to_s.strip
+end
+
+def truncate(text, width)
+  return text if text.length <= width
+
+  "#{text[0, width - 3]}..."
+end
+
 if ARGV.delete('--preview')
   session = ARGV.first
   abort 'usage: claude.fzf --preview SESSION' unless session
@@ -129,7 +179,7 @@ panes = if ENV['TMUX']
           orphans.filter_map do |prc|
             next unless (start = start_time_of(prc[:pid]))
 
-            dir = File.expand_path("~/.claude/projects/#{prc[:cwd].gsub(/[^a-zA-Z0-9]/, '-')}")
+            dir = project_dir(prc[:cwd])
             found = Dir["#{dir}/*.jsonl"]
                       .select { File.mtime(it) >= start }
                       .map { File.basename(it, '.jsonl') }
@@ -146,6 +196,7 @@ COLUMN_HEADER = [
   'TIMESTAMP'.ljust(23),
   'PANE'.ljust(5),
   'SESSION'.ljust(36),
+  'NAME'.ljust(30),
   'PROJECT'
 ].map(&:bold).join('  ')
 
@@ -160,6 +211,7 @@ entries = entries.group_by { it[:sessionId] }.transform_values do |items|
 end.values.flatten
 
 color_map = Hash.new { |h, k| h[k] = COLORS[h.size % COLORS.size] }
+title_map = Hash.new { |h, k| h[k] = session_title(*k) }
 
 fzf_command = <<~CMD
   fzf --read0 --ansi --reverse --style full --gap --wrap word \\
@@ -194,6 +246,7 @@ selected = IO.popen(fzf_command, 'r+') do |io|
     io.puts [format_time(timestamp).cyan,
              pane_display,
              session.fg(color_map[session]),
+             truncate(title_map[[session, project]], 30).ljust(30).yellow,
              dir.blue].map { it + ZWSP }.join('  ')
     display.each_line do
       io.print "  #{it.italic}"
