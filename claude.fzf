@@ -195,8 +195,8 @@ panes = if ENV['TMUX']
 COLUMN_HEADER = [
   'TIMESTAMP'.ljust(23),
   'PANE'.ljust(5),
-  'SESSION'.ljust(36),
-  'NAME'.ljust(30),
+  'SESSION'.ljust(8),
+  'NAME'.ljust(50),
   'PROJECT'
 ].map(&:bold).join('  ')
 
@@ -245,8 +245,8 @@ selected = IO.popen(fzf_command, 'r+') do |io|
     io.print [command, session, project, offset].map { it.to_s + ZWSP }.join
     io.puts [format_time(timestamp).cyan,
              pane_display,
-             session.fg(color_map[session]),
-             truncate(title_map[[session, project]], 30).ljust(30).yellow,
+             session[0, 8].fg(color_map[session]),
+             truncate(title_map[[session, project]], 50).ljust(50).yellow,
              dir.blue].map { it + ZWSP }.join('  ')
     display.each_line do
       io.print "  #{it.italic}"
