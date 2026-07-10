@@ -246,7 +246,7 @@ selected = IO.popen(fzf_command, 'r+') do |io|
     io.puts [format_time(timestamp).cyan,
              pane_display,
              session[0, 8].fg(color_map[session]),
-             truncate(title_map[[session, project]], 50).ljust(50).yellow,
+             truncate(title_map[[session, project]], 50).ljust(50).fg(color_map[session]),
              dir.blue].map { it + ZWSP }.join('  ')
     display.each_line do
       io.print "  #{it.italic}"
