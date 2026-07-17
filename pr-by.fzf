@@ -27,8 +27,16 @@ limit=50
 if [[ "$1" == --limit=* ]]; then
   limit="${1#--limit=}"
   shift
+  if [[ ! $limit =~ ^[1-9][0-9]*$ ]]; then
+    echo "invalid limit: $limit" >&2
+    exit 1
+  fi
 fi
 who=$1
+if [[ -z $who ]]; then
+  echo "usage: ${0##*/} [--limit=N] <author> [fzf-args]" >&2
+  exit 1
+fi
 shift
 
 fzf --tmux 80%,100%,border-native --ansi \
@@ -36,7 +44,7 @@ fzf --tmux 80%,100%,border-native --ansi \
     --preview 'GH_FORCE_TTY=$FZF_PREVIEW_COLUMNS gh pr view --repo {1} --comments {2}' \
     --preview-window up:border-down \
     --with-shell 'bash -c' \
-    --bind "start:preview(echo Loading pull requests ...)+reload:GH_FORCE_TTY=95% gh search prs --author $who --limit $limit" \
+    --bind "start:preview(echo Loading pull requests ...)+reload:GH_FORCE_TTY=95% gh search prs --author ${who@Q} --limit ${limit@Q}" \
     --bind 'load:transform:(( FZF_TOTAL_COUNT )) || echo become:echo No pull requests' \
     --bind 'enter,ctrl-o:execute-silent:gh pr view --web --repo {1} {2}' \
     --bind 'ctrl-v:execute:gh pr view --repo {1} {2} | sed "s/\r//g" | view - +"setf markdown"' \
