@@ -22,14 +22,64 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-fzf --tmux 80%,100%,border-native --ansi \
-    --info inline --reverse --header-lines 4 \
+# Third stage: extract selected files from the PR revision and view them
+# in $EDITOR, then return to the file selector. Edits only affect the
+# temporary copies, not the PR.
+if [[ ${1:-} == --view ]]; then
+  tmp=$2 rev=$3
+  files=()
+  while IFS= read -r file; do
+    mkdir -p "$tmp/$(dirname "$file")"
+    if [[ -s "$tmp/$file" ]] || git show "$rev:$file" > "$tmp/$file" 2> /dev/null; then
+      files+=("$tmp/$file")
+    else
+      rm -f "$tmp/$file"
+      echo "skipped (deleted in PR): $file" >&2
+    fi
+  done < "$4"
+  [[ ${#files[@]} -gt 0 ]] || exit 1
+  exec ${EDITOR:-vim} "${files[@]}"
+fi
+
+# Second stage: browse files modified in a PR and open them in $EDITOR
+# without checking out the branch
+if [[ ${1:-} == --files ]]; then
+  pr=${2#'#'}
+  cd "$(git rev-parse --show-toplevel)" || exit 1
+
+  echo "Fetching PR #$pr ..." >&2
+  git fetch -q origin "refs/pull/$pr/head"
+  rev=$(git rev-parse FETCH_HEAD)
+  { read -r base; read -r title; } < <(gh pr view "$pr" --json baseRefName,title --jq '.baseRefName, .title')
+  git fetch -q origin "$base"
+  mb=$(git merge-base FETCH_HEAD "$rev")
+
+  tmp=$(mktemp -d "${TMPDIR:-/tmp}/pr-$pr.XXXXXX")
+  trap 'rm -rf "$tmp"' EXIT
+
+  git diff --name-only "$mb" "$rev" |
+    # --no-popup so $EDITOR doesn't open inside a floating pane
+    fzf --no-popup --ansi --style full --reverse --multi \
+        --prompt "PR #$pr> " \
+        --header "$title" --header-border inline \
+        --preview "git diff --color=always $mb $rev -- {}" \
+        --preview-window down \
+        --bind "enter:execute:$0 --view $tmp $rev {+f}" \
+        --footer-border inline \
+        --footer 'Press Enter to open in editor (TAB to select multiple)'
+  exit
+fi
+
+fzf --tmux 80%,100% --ansi \
+    --reverse --style full --header-lines 4 --header-border inline \
     --preview 'GH_FORCE_TTY=$FZF_PREVIEW_COLUMNS gh pr view --comments {1}' \
-    --preview-window up:border-down \
+    --preview-window down \
     --with-shell 'bash -c' \
     --bind 'start:preview(echo Loading pull requests ...)+reload:GH_FORCE_TTY=95% gh pr list --limit=1000' \
     --bind 'load:transform:(( FZF_TOTAL_COUNT )) || echo become:echo No pull requests' \
     --bind 'ctrl-o:execute-silent:gh pr view --web {1}' \
     --bind 'ctrl-v:execute:gh pr view {1} | sed "s/\r//g" | view - +"setf markdown"' \
+    --bind 'ctrl-f:become:'"$0"' --files {1}' \
     --bind 'enter:become:gh pr checkout {1}' \
-    --footer 'Press Enter to checkout / CTRL-O to open in browser / CTRL-V to open in editor' "$@"
+    --footer-border inline \
+    --footer 'Press Enter to checkout / CTRL-F to browse files / CTRL-O to open in browser / CTRL-V to open in editor' "$@"
