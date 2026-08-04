@@ -66,33 +66,29 @@ rescue JSON::ParserError
   nil
 end
 
-def session_title_from_transcript(session, project)
+def session_meta_from_transcript(session, project)
   path = File.join(project_dir(project), "#{session}.jsonl")
-  return unless File.exist?(path)
+  return {} unless File.exist?(path)
 
-  title = nil
+  meta = {}
   File.foreach(path) do |line|
     event = JSON.parse(line)
-    title = case event['type']
-            when 'custom-title'
-              event['customTitle']
-            when 'agent-name'
-              event['agentName']
-            when 'ai-title'
-              event['aiTitle']
-            else
-              title
-            end
+    case event['type']
+    when 'custom-title' then meta[:title] = event['customTitle']
+    when 'agent-name' then meta[:title] = event['agentName']
+    when 'ai-title' then meta[:title] = event['aiTitle']
+    when 'agent-color' then meta[:color] = event['agentColor']
+    end
   rescue JSON::ParserError
     next
   end
-  title
+  meta
 end
 
-def session_title(session, project)
-  title = session_title_from_index(session, project) ||
-          session_title_from_transcript(session, project)
-  title.to_s.lines.first.to_s.strip
+def session_meta(session, project)
+  meta = session_meta_from_transcript(session, project)
+  title = session_title_from_index(session, project) || meta[:title]
+  { title: title.to_s.lines.first.to_s.strip, color: NAMED_COLORS[meta[:color]] }
 end
 
 def truncate(text, width)
@@ -124,13 +120,21 @@ RS = "\x0"
 ZWSP = "\u200B"
 HOME = Dir.home
 
+# Colors set by /color, mapped as Claude Code itself maps them to the terminal.
+# "default" is absent by design; it clears the color.
+NAMED_COLORS = {
+  'red' => 1, 'green' => 2, 'yellow' => 3, 'blue' => 4,
+  'purple' => 5, 'cyan' => 6, 'pink' => 205, 'orange' => 208
+}.freeze
+
 # ANSI 256 color palette, skipping the darkest cube colors for legibility.
-COLORS = (17..230).select do |c|
+# Excludes NAMED_COLORS so an assigned color never mimics a chosen one.
+COLORS = ((17..230).select do |c|
   idx = c - 16
   rgb = [idx / 36, (idx / 6) % 6, idx % 6]
   r, g, b = rgb
   rgb.sum >= 7 && r > g && g > b
-end.freeze
+end - NAMED_COLORS.values).freeze
 
 # Session ID of a running claude process, read from the environment of its
 # child processes (MCP servers, tool shells). Nil for a childless claude.
@@ -211,7 +215,7 @@ entries = entries.group_by { it[:sessionId] }.transform_values do |items|
 end.values.flatten
 
 color_map = Hash.new { |h, k| h[k] = COLORS[h.size % COLORS.size] }
-title_map = Hash.new { |h, k| h[k] = session_title(*k) }
+meta_map = Hash.new { |h, k| h[k] = session_meta(*k) }
 
 fzf_command = <<~CMD
   fzf --read0 --ansi --reverse --style full --gap --wrap word \\
@@ -242,11 +246,14 @@ selected = IO.popen(fzf_command, 'r+') do |io|
       pane_display = '     '
     end
 
+    meta = meta_map[[session, project]]
+    color = meta[:color] || color_map[session]
+
     io.print [command, session, project, offset].map { it.to_s + ZWSP }.join
     io.puts [format_time(timestamp).cyan,
              pane_display,
-             session[0, 8].fg(color_map[session]),
-             truncate(title_map[[session, project]], 50).ljust(50).fg(color_map[session]),
+             session[0, 8].fg(color),
+             truncate(meta[:title], 50).ljust(50).fg(color),
              dir.blue].map { it + ZWSP }.join('  ')
     display.each_line do
       io.print "  #{it.italic}"
