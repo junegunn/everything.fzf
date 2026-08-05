@@ -98,7 +98,7 @@ module ChromeFzf
           --bind 'ctrl-t:reload(ruby #{__FILE__.shellescape} --list t)+change-multi(0)+change-border-label( Chrome::Tabs )+top' \\
           --bind 'ctrl-h:reload(ruby #{__FILE__.shellescape} --list h)+change-multi+change-border-label( Chrome::History )+top' \\
           --bind 'ctrl-w:transform:
-                  [[ $FZF_BORDER_LABEL =~ Tabs ]] || exit
+                  [[ $FZF_BORDER_LABEL =~ Tabs ]] || { echo unix-word-rubout; exit; }
                   chrome-cli close -t {3} > /dev/null
                   echo "reload:ruby #{__FILE__.shellescape} --list t"
           '
