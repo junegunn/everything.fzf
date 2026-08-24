@@ -242,7 +242,8 @@ selected = IO.popen(fzf_command, 'r+') do |io|
                  tmux select-pane -t #{pane_id}"
       pane_display = pane_id.ljust(5).green
     else
-      command = "cd #{project.shellescape} && exec claude -r #{session}"
+      claude_command = ENV.fetch('CLAUDE_COMMAND', 'claude')
+      command = "cd #{project.shellescape}; exec #{claude_command} -r #{session}"
       pane_display = '     '
     end
 
