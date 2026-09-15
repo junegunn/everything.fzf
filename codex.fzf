@@ -1,0 +1,314 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# MIT License
+#
+# Copyright (c) 2026 Junegunn Choi
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files, to deal in the
+# Software without restriction, including without limitation the rights to
+# use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in
+# all copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+# FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+# IN THE SOFTWARE.
+
+require 'json'
+require 'time'
+require 'shellwords'
+
+begin
+  require 'ansi256'
+rescue LoadError
+  require 'bundler/inline'
+  gemfile(true) do
+    source 'https://rubygems.org'
+    gem 'ansi256'
+  end
+end
+
+ROOT = File.expand_path('~/.codex')
+SESSION_GLOB = File.join(ROOT, 'sessions', '*', '*', '*', '*.jsonl')
+RS = "\x0"
+ZWSP = "\u200B"
+HOME = Dir.home
+
+abort "Session directory not found: #{ROOT}/sessions" unless Dir.exist?(File.join(ROOT, 'sessions'))
+
+def truncate(text, width)
+  return text if text.length <= width
+
+  "#{text[0, width - 3]}..."
+end
+
+def clean(text)
+  text.to_s.gsub(/\s+/, ' ').strip
+end
+
+def input_text(payload)
+  return unless payload['type'] == 'message' && payload['role'] == 'user'
+
+  payload.fetch('content', []).filter_map do |part|
+    part['text'] if part['type'] == 'input_text'
+  end.join("\n")
+end
+
+def generated_context?(text)
+  text.start_with?('<environment_context>', '<permissions instructions>',
+                   '<skills_instructions>', '<collaboration_mode>', '<skill>',
+                   '# AGENTS.md instructions\n\n<INSTRUCTIONS>')
+end
+
+def event_time(event, path)
+  Time.parse(event['timestamp'].to_s)
+rescue ArgumentError
+  File.mtime(path)
+end
+
+def prompt_entries_from(path)
+  messages = []
+  fallback = []
+
+  File.foreach(path) do |line|
+    event = JSON.parse(line)
+    payload = event['payload'] || {}
+
+    case event['type']
+    when 'event_msg'
+      message = payload['message']
+      if payload['type'] == 'user_message' && !generated_context?(message.to_s)
+        messages << { text: message, timestamp: event_time(event, path) }
+      end
+    when 'response_item'
+      text = input_text(payload)
+      if text && !text.empty? && !generated_context?(text)
+        fallback << { text: text, timestamp: event_time(event, path) }
+      end
+    end
+  rescue JSON::ParserError
+    next
+  end
+
+  messages.empty? ? fallback : messages
+end
+
+def session_index
+  path = File.join(ROOT, 'session_index.jsonl')
+  return {} unless File.exist?(path)
+
+  File.foreach(path).each_with_object({}) do |line, index|
+    entry = JSON.parse(line)
+    title = clean(entry['thread_name'])
+    index[entry['id']] = title unless title.empty?
+  rescue JSON::ParserError
+    next
+  end
+end
+
+def session_info(path, titles)
+  meta = nil
+
+  File.foreach(path) do |line|
+    event = JSON.parse(line)
+    meta = event['payload'] || {} if event['type'] == 'session_meta'
+  rescue JSON::ParserError
+    next
+  end
+
+  return unless meta
+
+  id = meta['session_id'] || meta['id']
+  return if id.to_s.empty?
+
+  timestamp = begin
+    Time.parse(meta['timestamp'].to_s)
+  rescue ArgumentError
+    File.mtime(path)
+  end
+
+  prompt = clean(prompt_entries_from(path).last&.fetch(:text, ''))
+  title = titles[id] || prompt
+  title = '(untitled session)' if title.empty?
+
+  return {
+    id: id,
+    cwd: meta['cwd'].to_s,
+    path: path,
+    prompt: prompt,
+    timestamp: timestamp || File.mtime(path)
+  }.merge(title: title)
+end
+
+def session_paths
+  Dir[SESSION_GLOB]
+end
+
+def print_preview(session)
+  entries = prompt_entries_from(session[:path]).sort_by { -it[:timestamp].to_i }
+  entries.each_with_index do |entry, index|
+    number = "##{entries.length - index}/#{entries.length}"
+    timestamp = entry[:timestamp].localtime.strftime('%F %a %T')
+    prompt_header = "#{number.green} #{timestamp.cyan}"
+
+    puts
+    puts prompt_header
+    puts ('▔' * prompt_header.plain.length).dim
+    puts entry[:text].italic
+    puts
+  end
+end
+
+if ARGV.delete('--preview')
+  id = ARGV.first
+  abort 'usage: codex.fzf --preview SESSION_ID' unless id
+
+  titles = session_index
+  session = session_paths.lazy.filter_map { session_info(it, titles) }
+                         .find { it[:id] == id }
+  abort "Session not found: #{id}" unless session
+
+  print_preview(session)
+  exit
+end
+
+titles = session_index
+entries = session_paths.filter_map { session_info(it, titles) }
+abort 'No Codex sessions found' if entries.empty?
+
+COLORS = (33..230).reject { |color| color % 36 < 7 }.freeze
+
+# Session ID of a running Codex process. `codex resume ID` carries it in argv.
+# Otherwise tool shells may expose it to child processes.
+def session_of(pid)
+  argv = `ps -ww -o command= -p #{pid}`
+  id = argv[/\bresume\s+(?:-\S+\s+)*(\h{8}-\h{4}-\h{4}-\h{4}-\h{12})\b/, 1]
+  return id if id
+
+  children = `pgrep -P #{pid}`.split
+  return if children.empty?
+
+  command = `ps -Eww -o command= -p #{children.join(',')}`
+  command[/\bCODEX_(?:THREAD|SESSION)_ID=(\S+)/, 1]
+end
+
+def start_time_of(pid)
+  Time.parse(`ps -o lstart= -p #{pid}`)
+rescue ArgumentError
+  nil
+end
+
+panes = if ENV['TMUX']
+          ttys = `tmux list-panes -a -F "\#{pane_tty} \#{session_name} \#{window_id} \#{pane_id}"`
+                   .lines
+                   .map { it.strip.split }
+                   .group_by(&:shift)
+                   .transform_values(&:flatten)
+
+          pids = `ps -axco pid=,comm=`.lines.filter_map do |line|
+            pid, command = line.split
+            pid if File.basename(command.to_s) == 'codex'
+          end
+
+          procs = (pids.empty? ? '' : `lsof -a -p #{pids.join(',')} -d cwd,0 -Fn`)
+                    .split(/^p/)
+                    .reject(&:empty?)
+                    .filter_map do |item|
+            tokens = item.split(/\n+/)
+            pane = ttys[tokens[4]&.[](1..)]
+            { pid: tokens[0], cwd: tokens[2]&.[](1..), pane: pane } if pane
+          end
+
+          sessions = {}
+          orphans = procs.reject do |process|
+            session = session_of(process[:pid])
+            session && (sessions[session] = process[:pane])
+          end
+
+          # Fall back to the single unclaimed transcript written after the process
+          # started, skipping ambiguous cases; a wrong pane is worse than none.
+          # Compare file mtime, not the session timestamp: a resumed session was
+          # created before the process that reopened it.
+          orphans.filter_map do |process|
+            start = start_time_of(process[:pid])
+            next unless start
+
+            found = entries.select do |entry|
+              entry[:cwd] == process[:cwd] && File.mtime(entry[:path]) >= start &&
+                !sessions.key?(entry[:id])
+            end
+            [found.first[:id], process[:pane]] if found.length == 1
+          end.group_by(&:first).each do |session, list|
+            sessions[session] = list.first.last if list.length == 1
+          end
+
+          sessions
+        end || {}
+
+COLUMN_HEADER = [
+  'TIMESTAMP'.ljust(23),
+  'PANE'.ljust(5),
+  'SESSION'.ljust(8),
+  'NAME'.ljust(50),
+  'PROJECT'
+].map(&:bold).join('  ')
+
+color_map = Hash.new { |hash, key| hash[key] = COLORS[hash.size % COLORS.size] }
+
+fzf_command = <<~CMD
+  fzf --read0 --ansi --reverse --style full --gap --wrap word \\
+      --delimiter "#{ZWSP}" --with-nth 5.. --accept-nth '{1}' \\
+      --highlight-line --scheme history \\
+      --border-label ' Codex sessions ' \\
+      --header 'Press Ctrl-/ to toggle preview' --header-lines 1 \\
+      --header-border dashed --header-lines-border inline \\
+      --preview 'ruby #{__FILE__.shellescape} --preview {2}' \\
+      --preview-window 'hidden:wrap-word:+{4}' \\
+      --bind 'ctrl-/:toggle-preview' #{ARGV.map(&:shellescape).join(' ')}
+CMD
+
+selected = IO.popen(fzf_command, 'r+') do |io|
+  io.print((ZWSP * 4) + COLUMN_HEADER + RS)
+  entries.sort_by { -it[:timestamp].to_i }.each do |entry|
+    id = entry[:id]
+    cwd = entry[:cwd]
+    directory = cwd.start_with?(HOME) ? cwd.sub(HOME, '~') : cwd
+
+    if (pane = panes[id])
+      session, window, pane_id = pane
+      command = "tmux switch-client -t #{session.shellescape} && " \
+                "tmux select-window -t #{window} && " \
+                "tmux select-pane -t #{pane_id}"
+      pane_display = pane_id.ljust(5).green
+    else
+      codex_command = ENV.fetch('CODEX_COMMAND', 'codex')
+      command = "cd #{cwd.shellescape}; exec #{codex_command} resume #{id.shellescape}"
+      pane_display = '     '
+    end
+
+    color = color_map[id]
+    io.print [command, id, entry[:path], 0].map { it.to_s + ZWSP }.join
+    io.puts [entry[:timestamp].localtime.strftime('%F %a %T').cyan,
+             pane_display,
+             id[0, 8].fg(color),
+             truncate(entry[:title], 50).ljust(50).fg(color),
+             directory.blue].map { it + ZWSP }.join('  ')
+    io.print "  #{entry[:prompt].italic}" unless entry[:prompt].empty?
+    io.print RS
+  rescue Errno::EPIPE
+    break
+  end
+  io.close_write
+  io.gets
+end
+
+exec "eval #{selected.shellescape}" if selected

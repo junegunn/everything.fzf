@@ -67,6 +67,13 @@ Scripts
 * Press enter to resume the session or switch to the tmux pane running the
   session
 
+### [_codex_](https://developers.openai.com/codex/)[.fzf](codex.fzf)
+
+* Browse prompts from Codex session transcripts in `~/.codex/sessions`
+* Show Codex thread names next to session IDs when available
+* Press enter to resume the session or switch to the tmux pane running the
+  session
+
 ### [_docker_](https://www.docker.com/)[.fzf](docker.fzf)
 
 * List running containers with memory usage
