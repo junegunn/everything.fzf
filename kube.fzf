@@ -26,6 +26,7 @@ read -d '' -r OPTS << 'EOF'
   --height 100% --border --layout reverse --info inline-right --with-shell 'bash -c'
   --style full --header-lines-border inline --no-input-border
   --color nth:regular,fg:dim
+  --bind alt-/:toggle-wrap-word+toggle-preview-wrap-word
   --bind 'click-header:transform:
     if [[ $FZF_CLICK_HEADER_WORD =~ ^[A-Z]+$ ]]; then
       echo "change-nth:$FZF_CLICK_HEADER_NTH"
@@ -84,6 +85,7 @@ d) # Deployments
     --bind 'enter:ignore' \
     --bind "start:reload:$command" \
     --bind "ctrl-r:reload:$command" \
+    --bind 'ctrl-/:change-preview-window(80%,border-bottom|hidden|)' \
     --bind 'ctrl-o:execute:vim -n <(kubectl logs --namespace {1} deployments/{2})' \
     --bind "ctrl-alt-r:execute(
               kubectl --namespace {1} rollout restart deployments/{2};
@@ -124,7 +126,7 @@ cj) # CronJobs
     --bind "ctrl-r:reload($command)+refresh-preview" \
     --bind 'ctrl-t:execute-silent(kubectl create job --namespace {1} --from=cronjob/{2} {2}-manual-$(date +%s))+refresh-preview' \
     --bind "ctrl-alt-x:execute(kubectl delete cronjob -n {1} {2})+reload:$command" \
-    --preview-window bottom,wrap-word \
+    --preview-window bottom \
     --preview "
       jobs=\$(kubectl get jobs --namespace {1} -o=jsonpath='{.items[?(@.metadata.ownerReferences[*].name==\"'{2}'\")].metadata.name}')
       if [[ -n \$jobs ]]; then
