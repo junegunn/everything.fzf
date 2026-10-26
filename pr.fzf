@@ -70,16 +70,21 @@ if [[ ${1:-} == --files ]]; then
   exit
 fi
 
+list='GH_FORCE_TTY=95% gh pr list --limit=500'
 fzf --tmux 80%,100% --ansi \
     --reverse --style full --header-lines 4 --header-border inline \
+    --prompt 'Open> ' \
     --preview 'GH_FORCE_TTY=$FZF_PREVIEW_COLUMNS gh pr view --comments {1}' \
     --preview-window down \
     --with-shell 'bash -c' \
-    --bind 'start:preview(echo Loading pull requests ...)+reload:GH_FORCE_TTY=95% gh pr list --limit=1000' \
-    --bind 'load:transform:(( FZF_TOTAL_COUNT )) || echo become:echo No pull requests' \
+    --bind "start:preview(echo Loading pull requests ...)+reload:$list" \
+    --bind 'load:transform:(( FZF_TOTAL_COUNT )) && exit
+      [[ $FZF_PROMPT = Open* ]] && echo "change-list-label: No open pull requests. Press ALT-A to include closed ones. " ||
+        echo become:echo No pull requests' \
+    --bind "alt-a:change-prompt(All> )+change-list-label()+unbind(alt-a)+reload:$list --state all" \
     --bind 'ctrl-o:execute-silent:gh pr view --web {1}' \
     --bind 'ctrl-v:execute:gh pr view {1} | sed "s/\r//g" | view - +"setf markdown"' \
     --bind 'ctrl-f:become:'"$0"' --files {1}' \
     --bind 'enter:become:gh pr checkout {1}' \
     --footer-border inline \
-    --footer 'Press Enter to checkout / CTRL-F to browse files / CTRL-O to open in browser / CTRL-V to open in editor' "$@"
+    --footer 'Press Enter to checkout / CTRL-F to browse files / CTRL-O to open in browser / CTRL-V to open in editor / ALT-A to include closed' "$@"

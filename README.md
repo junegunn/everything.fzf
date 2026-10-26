@@ -141,6 +141,7 @@ usage: kube.fzf [p|d|j|cj|sc|sn]
 ### [_pr_](https://docs.github.com/en/pull-requests)[.fzf](pr.fzf)
 
 * Browse and check out a GitHub pull request for the current repository
+* Press `ALT-A` to include closed and merged pull requests
 * Press `CTRL-V` to view the pull request in Vim
 * Press `CTRL-O` to open the pull request in your browser
 
