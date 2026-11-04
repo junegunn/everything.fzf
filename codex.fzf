@@ -66,7 +66,7 @@ end
 def generated_context?(text)
   text.start_with?('<environment_context>', '<permissions instructions>',
                    '<skills_instructions>', '<collaboration_mode>', '<skill>',
-                   '# AGENTS.md instructions\n\n<INSTRUCTIONS>')
+                   '# AGENTS.md instructions')
 end
 
 def event_time(event, path)
@@ -115,6 +115,22 @@ def session_index
   end
 end
 
+def prompt_preview(entry, number, total)
+  timestamp = entry[:timestamp].localtime.strftime('%F %a %T')
+  header = "#{"##{number}/#{total}".green} #{timestamp.cyan}"
+  "#{header}\n#{('▔' * header.plain.length).dim}\n#{entry[:text].to_s.italic}\n\n"
+end
+
+def prompts_with_offsets(path)
+  prompts = prompt_entries_from(path).sort_by { -it[:timestamp].to_f }
+  offset = 1
+  prompts.each_with_index.map do |prompt, index|
+    prompt.merge(offset: offset).tap do
+      offset += prompt_preview(prompt, prompts.length - index, prompts.length).lines.count
+    end
+  end
+end
+
 def session_info(path, titles)
   meta = nil
 
@@ -130,22 +146,15 @@ def session_info(path, titles)
   id = meta['session_id'] || meta['id']
   return if id.to_s.empty?
 
-  timestamp = begin
-    Time.parse(meta['timestamp'].to_s)
-  rescue ArgumentError
-    File.mtime(path)
-  end
-
-  prompt = clean(prompt_entries_from(path).last&.fetch(:text, ''))
-  title = titles[id] || prompt
+  prompts = prompts_with_offsets(path)
+  title = titles[id] || clean(prompts.first&.fetch(:text, ''))
   title = '(untitled session)' if title.empty?
 
   return {
     id: id,
     cwd: meta['cwd'].to_s,
     path: path,
-    prompt: prompt,
-    timestamp: timestamp || File.mtime(path)
+    prompts: prompts
   }.merge(title: title)
 end
 
@@ -154,27 +163,20 @@ def session_paths
 end
 
 def print_preview(session)
-  entries = prompt_entries_from(session[:path]).sort_by { -it[:timestamp].to_i }
+  entries = session[:prompts]
   entries.each_with_index do |entry, index|
-    number = "##{entries.length - index}/#{entries.length}"
-    timestamp = entry[:timestamp].localtime.strftime('%F %a %T')
-    prompt_header = "#{number.green} #{timestamp.cyan}"
-
-    puts
-    puts prompt_header
-    puts ('▔' * prompt_header.plain.length).dim
-    puts entry[:text].italic
-    puts
+    print prompt_preview(entry, entries.length - index, entries.length)
   end
 end
 
 if ARGV.delete('--preview')
   id = ARGV.first
-  abort 'usage: codex.fzf --preview SESSION_ID' unless id
+  abort 'usage: codex.fzf --preview SESSION_ID [TRANSCRIPT_PATH]' unless id
 
   titles = session_index
-  session = session_paths.lazy.filter_map { session_info(it, titles) }
-                         .find { it[:id] == id }
+  paths = ARGV[1] ? [ARGV[1]] : session_paths
+  session = paths.lazy.filter_map { session_info(it, titles) }
+                      .find { it[:id] == id }
   abort "Session not found: #{id}" unless session
 
   print_preview(session)
@@ -182,8 +184,11 @@ if ARGV.delete('--preview')
 end
 
 titles = session_index
-entries = session_paths.filter_map { session_info(it, titles) }
-abort 'No Codex sessions found' if entries.empty?
+transcripts = session_paths.filter_map { session_info(it, titles) }
+entries = transcripts.flat_map do |session|
+  session[:prompts].map { session.merge(it) }
+end
+abort 'No Codex prompts found' if entries.empty?
 
 COLORS = (33..230).reject { |color| color % 36 < 7 }.freeze
 
@@ -242,7 +247,7 @@ panes = if ENV['TMUX']
             start = start_time_of(process[:pid])
             next unless start
 
-            found = entries.select do |entry|
+            found = transcripts.select do |entry|
               entry[:cwd] == process[:cwd] && File.mtime(entry[:path]) >= start &&
                 !sessions.key?(entry[:id])
             end
@@ -271,14 +276,14 @@ fzf_command = <<~CMD
       --border-label ' Codex sessions ' \\
       --header 'Press Ctrl-/ to toggle preview' --header-lines 1 \\
       --header-border dashed --header-lines-border inline \\
-      --preview 'ruby #{__FILE__.shellescape} --preview {2}' \\
+      --preview 'ruby #{__FILE__.shellescape} --preview {2} {3}' \\
       --preview-window 'hidden:wrap-word:+{4}' \\
       --bind 'ctrl-/:toggle-preview' #{ARGV.map(&:shellescape).join(' ')}
 CMD
 
 selected = IO.popen(fzf_command, 'r+') do |io|
   io.print((ZWSP * 4) + COLUMN_HEADER + RS)
-  entries.sort_by { -it[:timestamp].to_i }.each do |entry|
+  entries.sort_by { -it[:timestamp].to_f }.each do |entry|
     id = entry[:id]
     cwd = entry[:cwd]
     directory = cwd.start_with?(HOME) ? cwd.sub(HOME, '~') : cwd
@@ -296,13 +301,13 @@ selected = IO.popen(fzf_command, 'r+') do |io|
     end
 
     color = color_map[id]
-    io.print [command, id, entry[:path], 0].map { it.to_s + ZWSP }.join
+    io.print [command, id, entry[:path], entry[:offset]].map { it.to_s + ZWSP }.join
     io.puts [entry[:timestamp].localtime.strftime('%F %a %T').cyan,
              pane_display,
              id[0, 8].fg(color),
              truncate(entry[:title], 50).ljust(50).fg(color),
              directory.blue].map { it + ZWSP }.join('  ')
-    io.print "  #{entry[:prompt].italic}" unless entry[:prompt].empty?
+    entry[:text].to_s.each_line { io.print "  #{it.italic}" }
     io.print RS
   rescue Errno::EPIPE
     break
