@@ -192,9 +192,12 @@ abort 'No Codex prompts found' if entries.empty?
 
 COLORS = (33..230).reject { |color| color % 36 < 7 }.freeze
 
-# Session ID of a running Codex process. `codex resume ID` carries it in argv.
-# Otherwise tool shells may expose it to child processes.
-def session_of(pid)
+# An open transcript identifies sessions selected through the resume picker.
+def session_of(process)
+  ids = process[:sessions]
+  return ids.first if ids.one?
+
+  pid = process[:pid]
   argv = `ps -ww -o command= -p #{pid}`
   id = argv[/\bresume\s+(?:-\S+\s+)*(\h{8}-\h{4}-\h{4}-\h{4}-\h{12})\b/, 1]
   return id if id
@@ -206,10 +209,61 @@ def session_of(pid)
   command[/\bCODEX_(?:THREAD|SESSION)_ID=(\S+)/, 1]
 end
 
+def open_files(fields)
+  files = {}
+  file = nil
+  fields.each do |field|
+    value = field[1..]
+    case field[0]
+    when 'f' then file = files[value] = {}
+    when 'n' then file[:path] = value if file
+    when 'a' then file[:access] = value if file
+    end
+  end
+  files
+end
+
+def open_sessions(files, transcripts_by_path)
+  files.values.filter_map do |file|
+    transcripts_by_path[file[:path]] if %w[w u].include?(file[:access])
+  end.uniq
+end
+
+def codex_processes(ttys)
+  terminals = `ps -axco pid=,tty=,comm=`.lines.filter_map do |line|
+    pid, tty, command = line.split
+    [pid, tty] if File.basename(command.to_s) == 'codex'
+  end.to_h
+  return [] if terminals.empty?
+
+  `lsof -nP -a -p #{terminals.keys.join(',')} -Ffan`.split(/^p/).reject(&:empty?).map do |item|
+    pid, *fields = item.lines.map(&:chomp)
+    files = open_files(fields)
+    pane = ttys[files.dig('0', :path)]
+    { pid: pid, cwd: files.dig('cwd', :path), pane: pane, files: files,
+      terminal: !terminals.fetch(pid, '?').start_with?('?') }
+  end
+end
+
 def start_time_of(pid)
   Time.parse(`ps -o lstart= -p #{pid}`)
 rescue ArgumentError
   nil
+end
+
+def session_candidates(process, transcripts, sessions, active_ids)
+  found = transcripts.select do |entry|
+    entry[:cwd] == process[:cwd] && !sessions.key?(entry[:id])
+  end
+
+  # A shared backend owns the transcripts for its terminal clients.
+  active = found.select { active_ids.include?(it[:id]) }
+  return active unless active.empty?
+
+  start = start_time_of(process[:pid])
+  return [] unless start
+
+  found.select { File.mtime(it[:path]) >= start }
 end
 
 panes = if ENV['TMUX']
@@ -219,38 +273,29 @@ panes = if ENV['TMUX']
                    .group_by(&:shift)
                    .transform_values(&:flatten)
 
-          pids = `ps -axco pid=,comm=`.lines.filter_map do |line|
-            pid, command = line.split
-            pid if File.basename(command.to_s) == 'codex'
-          end
-
-          procs = (pids.empty? ? '' : `lsof -a -p #{pids.join(',')} -d cwd,0 -Fn`)
-                    .split(/^p/)
-                    .reject(&:empty?)
-                    .filter_map do |item|
-            tokens = item.split(/\n+/)
-            pane = ttys[tokens[4]&.[](1..)]
-            { pid: tokens[0], cwd: tokens[2]&.[](1..), pane: pane } if pane
-          end
+          procs = codex_processes(ttys)
+          transcripts_by_path = transcripts.to_h { [it[:path], it[:id]] }
+          procs.each { it[:sessions] = open_sessions(it[:files], transcripts_by_path) }
+          active_ids = procs.flat_map { it[:sessions] }.uniq
 
           sessions = {}
-          orphans = procs.reject do |process|
-            session = session_of(process[:pid])
-            session && (sessions[session] = process[:pane])
+          clients = procs.select { it[:pane] || it[:terminal] }
+          # Reserve sessions owned by clients outside this tmux server.
+          clients.reject { it[:pane] }.each do |process|
+            process[:sessions].each { sessions[it] = nil }
+          end
+          orphans = clients.reject do |process|
+            session = session_of(process)
+            next false unless session
+
+            sessions[session] ||= process[:pane]
+            true
           end
 
-          # Fall back to the single unclaimed transcript written after the process
-          # started, skipping ambiguous cases; a wrong pane is worse than none.
-          # Compare file mtime, not the session timestamp: a resumed session was
-          # created before the process that reopened it.
+          # Match unclaimed active sessions by directory, then try modification
+          # times. Require a unique session and pane in either case.
           orphans.filter_map do |process|
-            start = start_time_of(process[:pid])
-            next unless start
-
-            found = transcripts.select do |entry|
-              entry[:cwd] == process[:cwd] && File.mtime(entry[:path]) >= start &&
-                !sessions.key?(entry[:id])
-            end
+            found = session_candidates(process, transcripts, sessions, active_ids)
             [found.first[:id], process[:pane]] if found.length == 1
           end.group_by(&:first).each do |session, list|
             sessions[session] = list.first.last if list.length == 1
