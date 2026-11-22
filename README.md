@@ -81,6 +81,21 @@ Scripts
 * Press `CTRL-S` to stop a container, `CTRL-T` to show stats and top
 * Press `CTRL-O` to open full logs in your editor
 
+### [_dockrun_](https://docs.docker.com/reference/cli/docker/container/run/)[.fzf](dockrun.fzf)
+
+* Select a local Docker image and start an interactive shell in it
+  (`bash`, falling back to `/bin/sh` if the image has no bash). The image's
+  `ENTRYPOINT` is overridden so you always get a shell.
+* If the image has no `/bin/sh` (e.g. distroless or `scratch` images), a static
+  busybox from the `busybox:musl` image is copied into `/.busybox` of the
+  container and its shell is started instead
+* To run an image that isn't local, type its name (e.g. `ubuntu:24.04`) and
+  press enter when nothing matches, or `ALT-Enter` to always use the typed
+  name. It is pulled from the registry first.
+* Or pass the image as the first argument to skip the picker:
+  `dockrun.fzf ubuntu:24.04 --rm`
+* Extra arguments are passed to `docker run` (e.g. `dockrun.fzf --rm`)
+
 ### [_figlet_](http://www.figlet.org/)[.fzf](figlet.fzf)
 
 * Type in text, select a font, preview the result, and press enter to copy it

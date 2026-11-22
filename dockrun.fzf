@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+
+# MIT License
+#
+# Copyright (c) 2026 Junegunn Choi
+#
+# Permission is hereby granted, free of charge, to any person obtaining a copy
+# of this software and associated documentation files (the "Software"), to deal
+# in the Software without restriction, including without limitation the rights
+# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+# copies of the Software, and to permit persons to whom the Software is
+# furnished to do so, subject to the following conditions:
+#
+# The above copyright notice and this permission notice shall be included in all
+# copies or substantial portions of the Software.
+#
+# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+# SOFTWARE.
+
+# Image given as the first argument skips the picker; docker create pulls it
+# if it isn't local
+if [[ $1 && $1 != -* ]]; then
+  image=$1
+  shift
+else
+  image=$(
+    {
+      echo $'IMAGE\tID\tCREATED\tSIZE'
+      docker images --format $'{{.Repository}}:{{.Tag}}\t{{.ID}}\t{{.CreatedSince}}\t{{.Size}}' |
+        awk -F '\t' -v OFS='\t' '$1 == "<none>:<none>" { $1 = $2 } 1'
+    } | column -ts $'\t' |
+    fzf --info inline-right --reverse --header-lines 1 \
+        --style full --header-lines-border inline --no-input-border \
+        --border-label ' DOCKER RUN ' --nth 1 --color nth:regular,fg:dim \
+        --header 'Enter (run; typed name if no match) │ ALT-Enter (run typed name)' \
+        --bind 'enter:accept-or-print-query' \
+        --bind 'alt-enter:print-query' \
+        --accept-nth 1
+  )
+fi
+[[ $image ]] || exit 1
+
+# ENTRYPOINT is overridden so the shell starts regardless of the image's
+# entrypoint. --entrypoint given in "$@" takes precedence as it comes later.
+container=$(docker create -it --entrypoint /bin/sh "$@" "$image" -c \
+  'if command -v bash > /dev/null; then exec bash; else exec /bin/sh; fi') || exit
+
+# Image has /bin/sh (bash preferred, sh fallback)
+if docker cp "$container:/bin/sh" - &> /dev/null; then
+  exec docker start -ai "$container"
+fi
+
+# No /bin/sh (e.g. distroless or scratch images). Recreate the container
+# with a static busybox from the busybox image copied into /.busybox.
+docker rm "$container" > /dev/null
+container=
+platform=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$image")
+helper=$(docker create --platform "$platform" busybox:musl sh -c \
+  'mkdir /.busybox && cp /bin/busybox /.busybox && /.busybox/busybox --install -s /.busybox') || exit
+docker start -a "$helper" &&
+  container=$(docker create -it --entrypoint /.busybox/sh "$@" "$image" -c \
+    'export PATH="$PATH:/.busybox"; exec sh') &&
+  docker cp "$helper:/.busybox" - | docker cp -q - "$container:/"
+status=$?
+docker rm "$helper" > /dev/null
+if (( status )); then
+  [[ $container ]] && docker rm "$container" > /dev/null
+  exit $status
+fi
+exec docker start -ai "$container"
